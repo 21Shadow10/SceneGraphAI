@@ -17,7 +17,6 @@ venv/
 .env
 
 # Input video and regenerable caches
-data/
 cache/
 
 # Outputs: keep the deliverables, ignore the full internal result
