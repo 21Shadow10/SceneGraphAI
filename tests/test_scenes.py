@@ -6,8 +6,18 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from video_analysis.scenes import MAX_ATTEMPTS, RequestBudgetError, SemanticAnalyzer, SemanticError
+from video_analysis.scenes import (
+    MAX_ATTEMPTS,
+    MAX_RATE_LIMIT_RETRIES,
+    RequestBudgetError,
+    SemanticAnalyzer,
+    SemanticError,
+)
 from video_analysis.schema import Frame, Shot, TranscriptSegment
+
+
+class RateLimited(Exception):
+    status_code = 429
 
 
 class MockChatModel:
@@ -65,7 +75,8 @@ def answer(request):
 
 def analyzer(tmp_path, respond=answer, **options):
     model = MockChatModel(respond)
-    return SemanticAnalyzer("test-model", tmp_path / "cache", chat_model=model, retry_delay_s=0, **options), model
+    return SemanticAnalyzer("test-model", tmp_path / "cache", chat_model=model,
+                            min_interval_s=0, retry_delay_s=0, **options), model
 
 
 def is_boundary_request(request):
@@ -190,6 +201,22 @@ def test_request_budget_includes_retries(tmp_path):
     with pytest.raises(RequestBudgetError):
         semantic.analyze(shots, [], frames, tmp_path)
     assert len(model.requests) == 2
+
+
+def test_rate_limits_are_waited_out_without_using_attempts_or_budget(tmp_path):
+    shots, frames = make_evidence(tmp_path, 1)
+    answers = iter([RateLimited(), RateLimited(), "bad json", RateLimited(), "bad json", None])
+    semantic, model = analyzer(tmp_path, lambda request: next(answers) or answer(request), max_requests=3)
+    assert semantic.analyze(shots, [], frames, tmp_path)
+    assert (len(model.requests), semantic.requests_made) == (6, 3)
+
+
+def test_persistent_rate_limit_gives_a_clear_error(tmp_path):
+    semantic, model = analyzer(tmp_path, lambda request: RateLimited())
+    with pytest.raises(SemanticError, match="rate-limited"):
+        semantic.preflight()
+    assert len(model.requests) == MAX_RATE_LIMIT_RETRIES + 1
+    assert semantic.requests_made == 0
 
 
 def test_oversized_requests_fail_before_calling_the_model(tmp_path):

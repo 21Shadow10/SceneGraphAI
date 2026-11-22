@@ -90,7 +90,7 @@ flowchart TD
 - **Structured output via LangChain and the Responses API.** [`SemanticAnalyzer`](src/video_analysis/scenes.py) uses `langchain_openai.ChatOpenAI` pointed at OpenRouter with `use_responses_api=True`. It calls `with_structured_output(..., method="json_schema", strict=True)`. OpenRouter is told to route only to providers that support every requested feature (`require_parameters`).
 - **Fail fast.** `preflight()` sends a tiny green image and expects `{"color": "green"}`. A model without image or strict-JSON support fails in seconds, not mid-run.
 - **Caching and resumption.** Each local stage is cached in `cache/` under a hash of the video and only the settings that stage depends on. Changing the face threshold, for example, reuses the shots and transcript. Each accepted LLM answer is cached under a hash of the full request: model, prompt, evidence, images and schema. An interrupted run resumes where it stopped and never pays twice for the same answer.
-- **Rate limits.** Failed calls are retried up to 4 times with exponential back-off (10 s, 20 s, 40 s). A hard `max_requests` budget, retries included, caps spending.
+- **Rate limits.** Free models reject back-to-back calls, so calls are spaced at least 10 s apart (`min_interval_s`; set 0 for paid models). An HTTP 429 is waited out with exponential back-off (10 s, 20 s, 40 s … up to 2 min, 6 times) and does not use up one of the 3 attempts reserved for invalid answers or provider errors. A hard `max_requests` budget caps billable calls, retries included.
 - **Traceability.** Every LLM call appends one line to `cache/semantic/llm-traces.jsonl`. It records the run ID, call ID, stage, model, request fingerprint, evidence IDs, attempt, outcome, duration, error type or HTTP status, response ID and token usage. Prompts, transcript text, images and keys are never written. LangChain `run_name`, `tags` and `metadata` are attached too, so LangSmith tracing works if you enable it.
 - **Anonymous face groups.** Faces are clustered, not recognised: no names, reference photos or identity claims. The prompt also tells the model not to identify real people from faces.
 
@@ -206,7 +206,8 @@ Use labels that were not used to tune `FACE_SIMILARITY`, and report how many ite
 
 | Symptom | Cause and fix |
 |---|---|
-| `SemanticError: ... (last error: OpenAIRateLimitError)` | The free route is rate-limited. Wait a minute and re-run the pipeline cell; completed answers are reused from the cache. |
+| `SemanticError: ... is still rate-limited after 6 retries` | The free route stayed busy for several minutes, or its daily quota is used up. Wait and re-run the pipeline cell; completed answers are reused from the cache. Persistent limits are best solved with a paid model. |
+| `SemanticError: ... failed after 3 attempts` | The model kept returning answers that fail validation. The error type of each attempt is in `cache/semantic/llm-traces.jsonl`; re-running usually succeeds, or switch to a stronger model. |
 | `SemanticError` in the preflight with `OpenAIModelNotFoundError` | The model ID does not exist or is no longer free. Change `OPENROUTER_MODEL`. Details per attempt are in `cache/semantic/llm-traces.jsonl`. |
 | `objc: Class AVFFrameReceiver is implemented in both ...` on macOS | PyAV and OpenCV each bundle FFmpeg's device library. The warning is harmless because neither library uses camera capture here. |
 | `UserWarning: ... has no audio track` | The video file is video-only, which is common with separately downloaded YouTube streams. Scenes are then based on frames alone. Use a file with audio for better descriptions. |
