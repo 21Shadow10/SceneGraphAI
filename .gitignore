@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Virtual environments
+.venv*/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets (copy .env.example to .env)
+.env
+
+# Input video and regenerable caches
+data/
+cache/
+
+# Outputs: keep the deliverables, ignore the full internal result
+outputs/*
+!outputs/analysis.json
+!outputs/extracted_faces/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
